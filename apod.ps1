@@ -1,30 +1,5 @@
 # NASA APOD háttérkép beállítása PowerShellből
 
-# Konzol-kódolás és logolás beállítása: jegyezzük meg az eredeti code page-et, és írjunk fájlba UTF-8-ként,
-# míg a konzolra írást az eredeti code page-re konvertáljuk, hogy elkerüljük a "mojibake"-et régi konzolokban.
-# Ne állítsunk tartósan chcp-t a scriptben — csak megjegyezzük az eredetit és ahhoz igazítjuk a képernyőre írást.
-try {
-    # Próbáljuk meg kiolvasni az induláskori code page-et (pl. "Active code page: 852").
-    $OriginalCodePage = $null
-    try {
-        $chcpOut = cmd /c chcp 2>&1
-        if ($chcpOut -match '\d{3,5}') { $OriginalCodePage = [int]$Matches[0] }
-    } catch {
-        # Ha ez nem sikerül, vegyük a .NET konzol beállítást, vagy legyen egy ésszerű alap (1250 - Central Europe)
-        try { $OriginalCodePage = [Console]::OutputEncoding.CodePage } catch { $OriginalCodePage = 1250 }
-    }
-
-    # UTF-8 encoding objektum fájlíráshoz és belső konverzióhoz
-    $UTF8 = [System.Text.Encoding]::UTF8
-
-    # (Nem kényszerítünk chcp váltást itt.)
-} catch {
-    Write-Host "Nem sikerült inicializálni a kódolási beállításokat: $($_.Exception.Message)"
-    # Folytassuk alapértelmezésekkel
-    $OriginalCodePage = 1250
-    $UTF8 = [System.Text.Encoding]::UTF8
-}
-
 # API kulcs: prioritásban a környezeti változó
 $apiKey = $env:NASA_API_KEY
 if (-not $apiKey) { $apiKey = "DEMO_KEY" }
@@ -50,11 +25,8 @@ function Write-Log {
         [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO'
     )
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    $line = "[$ts] [$Level] $Message"
-
-    # Konvertáljuk a konzolra írandó szöveget az eredeti (induláskori) code page-re,
-    # hogy a host a saját várt bájtokat kapja és ne legyen mojibake.
-    try {                if (-not $OriginalCodePage) { $targetCp = [Console]::OutputEncoding.CodePage } else { $targetCp = $OriginalCodePage }        $targetEnc = [System.Text.Encoding]::GetEncoding($targetCp)        $bytesUtf8 = $UTF8.GetBytes($line)        $bytesTarget = [System.Text.Encoding]::Convert($UTF8, $targetEnc, $bytesUtf8)        $outLine = $targetEnc.GetString($bytesTarget)    } catch {        # Ha bármi hiba történik, használjuk az eredeti sort        $outLine = $line    }    if ($Level -eq 'ERROR') { Write-Error $outLine } else { Write-Host $outLine }    if (-not $logDisabled -and $logPath) {        try {            # Írjunk fájlba UTF-8 kódolással. PowerShell 6+ támogatja az -Encoding opciót Add-Content-nél,            # régi PS5.1 esetén használjuk az Out-File -Append -Encoding UTF8 megoldást.            if ($PSVersionTable.PSVersion.Major -ge 6) {                Add-Content -Path $logPath -Value $line -Encoding UTF8            } else {                $line | Out-File -FilePath $logPath -Encoding UTF8 -Append            }        } catch {            # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra (konvertáljuk is).            $warnTs = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')            $warnLine = "[$warnTs] [WARN] Nem sikerült naplófájlba írni: $($_.Exception.Message)"            try {                if (-not $OriginalCodePage) { $targetCp2 = [Console]::OutputEncoding.CodePage } else { $targetCp2 = $OriginalCodePage }                $targetEnc2 = [System.Text.Encoding]::GetEncoding($targetCp2)                $bU = $UTF8.GetBytes($warnLine)                $bT = [System.Text.Encoding]::Convert($UTF8, $targetEnc2, $bU)                $outWarn = $targetEnc2.GetString($bT)            } catch { $outWarn = $warnLine }            Write-Host $outWarn        }    }}
+    $outLine = "[$ts] [$Level] $Message"
+    if ($Level -eq 'ERROR') { Write-Error $outLine } else { Write-Host $outLine }    if (-not $logDisabled -and $logPath) {        try {            # Írjunk fájlba UTF-8 kódolással. PowerShell 6+ támogatja az -Encoding opciót Add-Content-nél,            # régi PS5.1 esetén használjuk az Out-File -Append -Encoding UTF8 megoldást.            if ($PSVersionTable.PSVersion.Major -ge 6) {                Add-Content -Path $logPath -Value $line -Encoding UTF8            } else {                $line | Out-File -FilePath $logPath -Encoding UTF8 -Append            }        } catch {            # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra (konvertáljuk is).            $warnTs = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')            $warnLine = "[$warnTs] [WARN] Nem sikerült naplófájlba írni: $($_.Exception.Message)"            try {                if (-not $OriginalCodePage) { $targetCp2 = [Console]::OutputEncoding.CodePage } else { $targetCp2 = $OriginalCodePage }                $targetEnc2 = [System.Text.Encoding]::GetEncoding($targetCp2)                $bU = $UTF8.GetBytes($warnLine)                $bT = [System.Text.Encoding]::Convert($UTF8, $targetEnc2, $bU)                $outWarn = $targetEnc2.GetString($bT)            } catch { $outWarn = $warnLine }            Write-Host $outWarn        }    }}
 
 # Segédfüggvény: próbálkozás ismétléssel (retries + exponenciális backoff)
 function Invoke-Retry {    param(        [ScriptBlock]$ScriptBlock,        [int]$MaxRetries = 3,        [int]$DelaySeconds = 2    )    $attempt = 0    while ($true) {        try {            return & $ScriptBlock        } catch {            $attempt++            if ($attempt -ge $MaxRetries) {                throw $_            } else {                $wait = [int]($DelaySeconds * [math]::Pow(2, $attempt - 1))                Write-Log "Próbálkozás $attempt sikertelen. Újrapróbálkozás $wait másodperc múlva..." 'WARN'                Start-Sleep -Seconds $wait            }        }    }}
