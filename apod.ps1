@@ -1,9 +1,18 @@
 # NASA APOD háttérkép beállítása PowerShellből
 
-# UTF-8 kimenet beállítása, hogy a terminálban jól jelenjenek meg a nemzeti karakterek 
+# UTF-8 kimenet beállítása, hogy a terminálban jól jelenjenek meg a nemzeti karakterek
 try {
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+    # Windows konzol kódoldalát UTF-8-ra állítjuk (65001).
+    # chcp parancs kimenetét elnyomjuk, hogy ne szennyezze a logot.
+    cmd /c chcp 65001 > $null 2>&1
+
+    # PowerShell és .NET konzol kódolás beállítása
+    $utf8 = [System.Text.Encoding]::GetEncoding(65001)
+    [Console]::OutputEncoding = $utf8
+    [Console]::InputEncoding  = $utf8
+
+    # PowerShell belső $OutputEncoding változója a redirekciókhoz/Out-File-hoz
+    $OutputEncoding = [System.Text.Encoding]::UTF8
 } catch {
     Write-Host "Nem sikerült beállítani a konzol kódolást: $($_.Exception.Message)"
 }
