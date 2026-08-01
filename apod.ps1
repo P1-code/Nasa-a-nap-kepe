@@ -114,8 +114,28 @@ try {
     exit 1
 }
 
-# Háttérkép beállítása Windows alatt
-if (-not $IsWindows) {
+# Háttérkép beállítása Windows alatt — megbízható OS ellenőrzés (támogatja a Windows PowerShell 5.1-et és PowerShell Core-t)
+$runningOnWindows = $false
+try {
+    if ($IsWindows -eq $true) { $runningOnWindows = $true }
+} catch {
+    # $IsWindows lehet, hogy nincs definiálva (pl. Windows PowerShell 5.1), ezért a fallback-et használjuk
+}
+
+if (-not $runningOnWindows) {
+    if ($env:OS -eq 'Windows_NT') { $runningOnWindows = $true }
+    else {
+        try {
+            if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+                $runningOnWindows = $true
+            }
+        } catch {
+            # Ha ez sem működik, marad false
+        }
+    }
+}
+
+if (-not $runningOnWindows) {
     Write-Log "A háttérkép beállítása csak Windows rendszeren támogatott." 'ERROR'
     exit 1
 }
