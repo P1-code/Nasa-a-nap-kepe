@@ -1,11 +1,8 @@
 # NASA APOD háttérkép beállítása PowerShellből
 
 # UTF-8 kimenet beállítása, hogy a terminálban jól jelenjenek meg a nemzeti karakterek 
-try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-# PowerShell-specific output encoding for external programs
-try { $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-# set code page to UTF-8 (optional; may be needed on older systems)
-chcp 65001 > $null
+[Native.Kernel32]::SetConsoleOutputCP(65001) | Out-Null
+[Native.Kernel32]::SetConsoleCP(65001) | Out-Null
 
 # API kulcs: prioritásban a környezeti változó
 $apiKey = $env:NASA_API_KEY
