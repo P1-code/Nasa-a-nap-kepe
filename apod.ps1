@@ -1,20 +1,28 @@
 # NASA APOD háttérkép beállítása PowerShellből
 
-# UTF-8 kimenet beállítása, hogy a terminálban jól jelenjenek meg a nemzeti karakterek
+# Konzol-kódolás és logolás beállítása: jegyezzük meg az eredeti code page-et, és írjunk fájlba UTF-8-ként,
+# míg a konzolra írást az eredeti code page-re konvertáljuk, hogy elkerüljük a "mojibake"-et régi konzolokban.
+# Ne állítsunk tartósan chcp-t a scriptben — csak megjegyezzük az eredetit és ahhoz igazítjuk a képernyőre írást.
 try {
-    # Windows konzol kódoldalát UTF-8-ra állítjuk (65001).
-    # chcp parancs kimenetét elnyomjuk, hogy ne szennyezze a logot.
-    cmd /c chcp 65001 > $null 2>&1
+    # Próbáljuk meg kiolvasni az induláskori code page-et (pl. "Active code page: 852").
+    $OriginalCodePage = $null
+    try {
+        $chcpOut = cmd /c chcp 2>&1
+        if ($chcpOut -match '\d{3,5}') { $OriginalCodePage = [int]$Matches[0] }
+    } catch {
+        # Ha ez nem sikerül, vegyük a .NET konzol beállítást, vagy legyen egy ésszerű alap (1250 - Central Europe)
+        try { $OriginalCodePage = [Console]::OutputEncoding.CodePage } catch { $OriginalCodePage = 1250 }
+    }
 
-    # PowerShell és .NET konzol kódolás beállítása
-    $utf8 = [System.Text.Encoding]::GetEncoding(65001)
-    [Console]::OutputEncoding = $utf8
-    [Console]::InputEncoding  = $utf8
+    # UTF-8 encoding objektum fájlíráshoz és belső konverzióhoz
+    $UTF8 = [System.Text.Encoding]::UTF8
 
-    # PowerShell belső $OutputEncoding változója a redirekciókhoz/Out-File-hoz
-    $OutputEncoding = [System.Text.Encoding]::UTF8
+    # (Nem kényszerítünk chcp váltást itt.)
 } catch {
-    Write-Host "Nem sikerült beállítani a konzol kódolást: $($_.Exception.Message)"
+    Write-Host "Nem sikerült inicializálni a kódolási beállításokat: $($_.Exception.Message)"
+    # Folytassuk alapértelmezésekkel
+    $OriginalCodePage = 1250
+    $UTF8 = [System.Text.Encoding]::UTF8
 }
 
 # API kulcs: prioritásban a környezeti változó
@@ -43,143 +51,46 @@ function Write-Log {
     )
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     $line = "[$ts] [$Level] $Message"
-    if ($Level -eq 'ERROR') { Write-Error $line } else { Write-Host $line }
 
-    if (-not $logDisabled -and $logPath) {
-        try {
-            Add-Content -Path $logPath -Value $line -ErrorAction Stop
-        } catch {
-            # Nem akadályozzuk a futást, csak írjuk ki konzolra, ha a fájlírás sikertelen
-            Write-Host "[$ts] [WARN] Nem sikerült naplófájlba írni: $($_.Exception.Message)"
-        }
-    }
-}
+    # Konvertáljuk a konzolra írandó szöveget az eredeti (induláskori) code page-re,
+    # hogy a host a saját várt bájtokat kapja és ne legyen mojibake.
+    try {                if (-not $OriginalCodePage) { $targetCp = [Console]::OutputEncoding.CodePage } else { $targetCp = $OriginalCodePage }        $targetEnc = [System.Text.Encoding]::GetEncoding($targetCp)        $bytesUtf8 = $UTF8.GetBytes($line)        $bytesTarget = [System.Text.Encoding]::Convert($UTF8, $targetEnc, $bytesUtf8)        $outLine = $targetEnc.GetString($bytesTarget)    } catch {        # Ha bármi hiba történik, használjuk az eredeti sort        $outLine = $line    }    if ($Level -eq 'ERROR') { Write-Error $outLine } else { Write-Host $outLine }    if (-not $logDisabled -and $logPath) {        try {            # Írjunk fájlba UTF-8 kódolással. PowerShell 6+ támogatja az -Encoding opciót Add-Content-nél,            # régi PS5.1 esetén használjuk az Out-File -Append -Encoding UTF8 megoldást.            if ($PSVersionTable.PSVersion.Major -ge 6) {                Add-Content -Path $logPath -Value $line -Encoding UTF8            } else {                $line | Out-File -FilePath $logPath -Encoding UTF8 -Append            }        } catch {            # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra (konvertáljuk is).            $warnTs = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')            $warnLine = "[$warnTs] [WARN] Nem sikerült naplófájlba írni: $($_.Exception.Message)"            try {                if (-not $OriginalCodePage) { $targetCp2 = [Console]::OutputEncoding.CodePage } else { $targetCp2 = $OriginalCodePage }                $targetEnc2 = [System.Text.Encoding]::GetEncoding($targetCp2)                $bU = $UTF8.GetBytes($warnLine)                $bT = [System.Text.Encoding]::Convert($UTF8, $targetEnc2, $bU)                $outWarn = $targetEnc2.GetString($bT)            } catch { $outWarn = $warnLine }            Write-Host $outWarn        }    }}
 
 # Segédfüggvény: próbálkozás ismétléssel (retries + exponenciális backoff)
-function Invoke-Retry {
-    param(
-        [ScriptBlock]$ScriptBlock,
-        [int]$MaxRetries = 3,
-        [int]$DelaySeconds = 2
-    )
-
-    $attempt = 0
-    while ($true) {
-        try {
-            return & $ScriptBlock
-        } catch {
-            $attempt++
-            if ($attempt -ge $MaxRetries) {
-                throw $_
-            } else {
-                $wait = [int]($DelaySeconds * [math]::Pow(2, $attempt - 1))
-                Write-Log "Próbálkozás $attempt sikertelen. Újrapróbálkozás $wait másodperc múlva..." 'WARN'
-                Start-Sleep -Seconds $wait
-            }
-        }
-    }
-}
+function Invoke-Retry {    param(        [ScriptBlock]$ScriptBlock,        [int]$MaxRetries = 3,        [int]$DelaySeconds = 2    )    $attempt = 0    while ($true) {        try {            return & $ScriptBlock        } catch {            $attempt++            if ($attempt -ge $MaxRetries) {                throw $_            } else {                $wait = [int]($DelaySeconds * [math]::Pow(2, $attempt - 1))                Write-Log "Próbálkozás $attempt sikertelen. Újrapróbálkozás $wait másodperc múlva..." 'WARN'                Start-Sleep -Seconds $wait            }        }    }}
 
 Write-Log "Lekérdezés indítása: $apodUrl" 'INFO'
 
 # APOD metaadatok lekérése (retry)
-try {
-    $apodData = Invoke-Retry -ScriptBlock { Invoke-RestMethod -Uri $apodUrl -ErrorAction Stop } -MaxRetries 3 -DelaySeconds 2
-    Write-Log "APOD metaadatok sikeresen lekérve." 'INFO'
-} catch {
-    Write-Log "Nem sikerült lekérni az APOD metaadatokat: $($_.Exception.Message)" 'ERROR'
-    exit 1
-}
+try {    $apodData = Invoke-Retry -ScriptBlock { Invoke-RestMethod -Uri $apodUrl -ErrorAction Stop } -MaxRetries 3 -DelaySeconds 2    Write-Log "APOD metaadatok sikeresen lekérve." 'INFO'} catch {    Write-Log "Nem sikerült lekérni az APOD metaadatokat: $($_.Exception.Message)" 'ERROR'    exit 1}
 
 # Ellenőrizzük, hogy valóban kép-e (APOD néha videó)
-if ($apodData.media_type -and $apodData.media_type -ne 'image') {
-    Write-Log "A mai APOD nem kép (media_type = $($apodData.media_type)). Nem állítok be háttérképet." 'INFO'
-    if ($apodData.url) { Write-Log "URL: $($apodData.url)" 'INFO' }
-    exit 0
-}
+if ($apodData.media_type -and $apodData.media_type -ne 'image') {    Write-Log "A mai APOD nem kép (media_type = $($apodData.media_type)). Nem állítok be háttérképet." 'INFO'    if ($apodData.url) { Write-Log "URL: $($apodData.url)" 'INFO' }    exit 0}
 
 # Kép URL-je
 $imageUrl = $apodData.hdurl
 if (-not $imageUrl) { $imageUrl = $apodData.url }
-if (-not $imageUrl) {
-    Write-Log "Nincs elérhető kép URL az API válaszban." 'ERROR'
-    exit 1
-}
+if (-not $imageUrl) {    Write-Log "Nincs elérhető kép URL az API válaszban." 'ERROR'    exit 1}
 Write-Log "Kép URL: $imageUrl" 'INFO'
 
 # Letöltési hely: próbáljuk először a OneDrive Pictures mappát, ha nincs, fallback a helyi Pictures mappára
-if (Test-Path $oneDrivePics) { $wallpaperDir = $oneDrivePics } elseif (Test-Path $localPics) { $wallpaperDir = $localPics } else { 
-    # Ha egyik sem létezik, létrehozzuk a helyi Pictures mappát
-    try {
-        New-Item -Path $localPics -ItemType Directory -Force | Out-Null
-        $wallpaperDir = $localPics
-    } catch {
-        Write-Log "Nem sikerült létrehozni a képmentési könyvtárat: $($_.Exception.Message)" 'ERROR'
-        exit 1
-    }
-}
+if (Test-Path $oneDrivePics) { $wallpaperDir = $oneDrivePics } elseif (Test-Path $localPics) { $wallpaperDir = $localPics } else {     # Ha egyik sem létezik, létrehozzuk a helyi Pictures mappát    try {        New-Item -Path $localPics -ItemType Directory -Force | Out-Null        $wallpaperDir = $localPics    } catch {        Write-Log "Nem sikerült létrehozni a képmentési könyvtárat: $($_.Exception.Message)" 'ERROR'        exit 1    }}
 
-$wallpaperPath = Join-Path $wallpaperDir "apod_wallpaper.jpg"
-Write-Log "Letöltési cél: $wallpaperPath" 'INFO'
+$wallpaperPath = Join-Path $wallpaperDir "apod_wallpaper.jpg"Write-Log "Letöltési cél: $wallpaperPath" 'INFO'
 
 # Kép letöltése (retry)
-try {
-    Invoke-Retry -ScriptBlock { Invoke-WebRequest -Uri $imageUrl -OutFile $wallpaperPath -ErrorAction Stop } -MaxRetries 4 -DelaySeconds 2
-    Write-Log "Kép letöltve: $wallpaperPath" 'INFO'
-} catch {
-    Write-Log "Nem sikerült letölteni a képet: $($_.Exception.Message)" 'ERROR'
-    exit 1
-}
+try {    Invoke-Retry -ScriptBlock { Invoke-WebRequest -Uri $imageUrl -OutFile $wallpaperPath -ErrorAction Stop } -MaxRetries 4 -DelaySeconds 2    Write-Log "Kép letöltve: $wallpaperPath" 'INFO'} catch {    Write-Log "Nem sikerült letölteni a képet: $($_.Exception.Message)" 'ERROR'    exit 1}
 
 # Háttérkép beállítása Windows alatt — megbízható OS ellenőrzés (támogatja a Windows PowerShell 5.1-et és PowerShell Core-t)
 $runningOnWindows = $false
-try {
-    if ($IsWindows -eq $true) { $runningOnWindows = $true }
-} catch {
-    # $IsWindows lehet, hogy nincs definiálva (pl. Windows PowerShell 5.1), ezért a fallback-et használjuk
-}
+try {    if ($IsWindows -eq $true) { $runningOnWindows = $true }} catch {    # $IsWindows lehet, hogy nincs definiálva (pl. Windows PowerShell 5.1), ezért a fallback-et használjuk}
 
-if (-not $runningOnWindows) {
-    if ($env:OS -eq 'Windows_NT') { $runningOnWindows = $true }
-    else {
-        try {
-            if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
-                $runningOnWindows = $true
-            }
-        } catch {
-            # Ha ez sem működik, marad false
-        }
-    }
-}
+if (-not $runningOnWindows) {    if ($env:OS -eq 'Windows_NT') { $runningOnWindows = $true }    else {        try {            if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {                $runningOnWindows = $true            }        } catch {            # Ha ez sem működik, marad false        }    }}
 
-if (-not $runningOnWindows) {
-    Write-Log "A háttérkép beállítása csak Windows rendszeren támogatott." 'ERROR'
-    exit 1
-}
+if (-not $runningOnWindows) {    Write-Log "A háttérkép beállítása csak Windows rendszeren támogatott." 'ERROR'    exit 1}
 
-Add-Type @"
-using System.Runtime.InteropServices;
-public class Wallpaper {
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
-}
-"@
+Add-Type @"using System.Runtime.InteropServices;public class Wallpaper {    [DllImport("user32.dll", SetLastError = true)]    public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);}"@
 
-$SPI_SETDESKWALLPAPER = 20
-$SPIF_UPDATEINIFILE = 1
-$SPIF_SENDWININICHANGE = 2
+$SPI_SETDESKWALLPAPER = 20$SPIF_UPDATEINIFILE = 1$SPIF_SENDWININICHANGE = 2
 
-try {
-    $result = [Wallpaper]::SystemParametersInfo($SPI_SETDESKWALLPAPER, 0, $wallpaperPath, $SPIF_UPDATEINIFILE -bor $SPIF_SENDWININICHANGE)
-    if ($result) {
-        Write-Log "Háttérkép sikeresen beállítva: $wallpaperPath" 'INFO'
-        exit 0
-    } else {
-        $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-        Write-Log "A SystemParametersInfo hívás sikertelen. Win32 hiba: $err" 'ERROR'
-        exit 1
-    }
-} catch {
-    Write-Log "Hiba történt a háttérkép beállítása közben: $($_.Exception.Message)" 'ERROR'
-    exit 1
-}
+try {    $result = [Wallpaper]::SystemParametersInfo($SPI_SETDESKWALLPAPER, 0, $wallpaperPath, $SPIF_UPDATEINIFILE -bor $SPIF_SENDWININICHANGE)    if ($result) {        Write-Log "Háttérkép sikeresen beállítva: $wallpaperPath" 'INFO'        exit 0    } else {        $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()        Write-Log "A SystemParametersInfo hívás sikertelen. Win32 hiba: $err" 'ERROR'        exit 1    }} catch {    Write-Log "Hiba történt a háttérkép beállítása közben: $($_.Exception.Message)" 'ERROR'    exit 1}
