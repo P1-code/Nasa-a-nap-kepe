@@ -193,4 +193,3 @@ try {
     Write-Log "Hiba történt a háttérkép beállítása közben: $($_.Exception.Message)" 'ERROR'
     exit 1
 }
-
