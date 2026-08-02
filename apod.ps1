@@ -163,9 +163,6 @@ public class Wallpaper {
 } else {
     Write-Log "Wallpaper típus már be van töltve — Add-Type kihagyva." 'INFO'
 }
-} else {
-    Write-Log "Wallpaper típus már be van töltve — Add-Type kihagyva." 'INFO'
-}
 
 $SPI_SETDESKWALLPAPER = 20
 $SPIF_UPDATEINIFILE = 1
