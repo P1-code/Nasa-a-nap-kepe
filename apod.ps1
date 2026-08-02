@@ -39,7 +39,13 @@ function Write-Log {
 
     # Use Write-Warning for non-terminating error output so the script doesn't
     # generate a PowerShell error record/exception when we only want to log.
-    if ($Level -eq 'ERROR') { Write-Warning $outLine } else { Write-Host $outLine }
+    # Print to console with colors instead of Write-Warning so PowerShell
+    # doesn't prefix the message with its own "WARNING:" label.
+    switch ($Level) {
+        'ERROR' { Write-Host $outLine -ForegroundColor Red }
+        'WARN'  { Write-Host $outLine -ForegroundColor Yellow }
+        default { Write-Host $outLine }
+    }
 
     if (-not $logDisabled -and $logPath) {
         try {
