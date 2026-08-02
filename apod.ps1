@@ -150,13 +150,19 @@ if (-not $runningOnWindows) {
     exit 1
 }
 
-Add-Type @"
+# Csak akkor definiáljuk újra, ha a Wallpaper típus még nincs betöltve
+$wallpaperType = [AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType("Wallpaper") } | Where-Object { $_ -ne $null } | Select-Object -First 1
+if (-not $wallpaperType) {
+    Add-Type @"
 using System.Runtime.InteropServices;
 public class Wallpaper {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
 }
 "@
+} else {
+    Write-Log "Wallpaper típus már be van töltve — Add-Type kihagyva." 'INFO'
+}
 
 $SPI_SETDESKWALLPAPER = 20
 $SPIF_UPDATEINIFILE = 1
