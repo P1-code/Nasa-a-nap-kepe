@@ -37,7 +37,9 @@ function Write-Log {
     $outLine = "[$ts] [$Level] $Message"
 
 
-    if ($Level -eq 'ERROR') { Write-Error $outLine } else { Write-Host $outLine }
+    # Use Write-Warning for non-terminating error output so the script doesn't
+    # generate a PowerShell error record/exception when we only want to log.
+    if ($Level -eq 'ERROR') { Write-Warning $outLine } else { Write-Host $outLine }
 
     if (-not $logDisabled -and $logPath) {
         try {
@@ -132,7 +134,7 @@ try {
     Write-Log "Kép letöltve: $wallpaperPath" 'INFO'
 } catch {
     Write-Log "Nem sikerült letölteni a képet: $($_.Exception.Message)" 'ERROR'
-    exit 1
+    #exit 1
 }
 
 # Háttérkép beállítása Windows alatt — megbízható OS ellenőrzés (támogatja a Windows PowerShell 5.1-et és PowerShell Core-t)
