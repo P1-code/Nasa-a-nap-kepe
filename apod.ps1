@@ -35,9 +35,9 @@ function Write-Log {
             # Írjunk fájlba UTF-8 kódolással. PowerShell 6+ támogatja az -Encoding opciót Add-Content-nél,
             # régi PS5.1 esetén használjuk az Out-File -Append -Encoding UTF8 megoldást.
             if ($PSVersionTable.PSVersion.Major -ge 6) {
-                Add-Content -Path $logPath -Value $line -Encoding UTF8
+                Add-Content -Path $logPath -Value $outLine -Encoding UTF8
             } else {
-                $line | Out-File -FilePath $logPath -Encoding UTF8 -Append
+                $outLine | Out-File -FilePath $logPath -Encoding UTF8 -Append
             }
         } catch {
             # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra (konvertáljuk is).
