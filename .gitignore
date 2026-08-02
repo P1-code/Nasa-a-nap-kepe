@@ -1,0 +1,15 @@
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+bin/
+obj/
+*.log
+*.tmp
+# PowerShell
+*.ps1xml
+# OS
+Thumbs.db
+.DS_Store
