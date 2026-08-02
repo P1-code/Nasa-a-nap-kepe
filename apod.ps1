@@ -40,17 +40,10 @@ function Write-Log {
                 $outLine | Out-File -FilePath $logPath -Encoding UTF8 -Append
             }
         } catch {
-            # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra (konvertáljuk is).
+            # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra.
             $warnTs = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
             $warnLine = "[$warnTs] [WARN] Nem sikerült naplófájlba írni: $($_.Exception.Message)"
-            try {
-                if (-not $OriginalCodePage) { $targetCp2 = [Console]::OutputEncoding.CodePage } else { $targetCp2 = $OriginalCodePage }
-                $targetEnc2 = [System.Text.Encoding]::GetEncoding($targetCp2)
-                $bU = $UTF8.GetBytes($warnLine)
-                $bT = [System.Text.Encoding]::Convert($UTF8, $targetEnc2, $bU)
-                $outWarn = $targetEnc2.GetString($bT)
-            } catch { $outWarn = $warnLine }
-            Write-Host $outWarn
+            Write-Host $warnLine
         }
     }
 }
