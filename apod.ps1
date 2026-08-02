@@ -10,6 +10,15 @@ $apodUrl = "https://api.nasa.gov/planetary/apod?api_key=$apiKey"
 $logDisabled = $false
 if ($env:APOD_LOG_DISABLE -and $env:APOD_LOG_DISABLE -eq '1') { $logDisabled = $true }
 
+# Konzol és kimeneti kódolás beállítása, hogy az ékezetek megjelenjenek
+try {
+    # Opció: chcp 65001 > $null  # ha szükséges, engedélyezheted az UTF-8 code page-t is
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {
+    # Ha nem megy, ne állítsa meg a scriptet
+}
+
 # Naplózási könyvtár: preferáljuk a OneDrive Pictures-t, majd a helyi Pictures-t
 $oneDrivePics = Join-Path $env:USERPROFILE "OneDrive\Pictures"
 $localPics = Join-Path $env:USERPROFILE "Pictures"
@@ -32,12 +41,14 @@ function Write-Log {
 
     if (-not $logDisabled -and $logPath) {
         try {
-            # Írjunk fájlba UTF-8 kódolással. PowerShell 6+ támogatja az -Encoding opciót Add-Content-nél,
-            # régi PS5.1 esetén használjuk az Out-File -Append -Encoding UTF8 megoldást.
-            if ($PSVersionTable.PSVersion.Major -ge 6) {
-                Add-Content -Path $logPath -Value $outLine -Encoding UTF8
+            # Írjunk fájlba UTF-8 kódolással. A jobb kompatibilitás érdekében új fájl létrehozásakor
+            # BOM-mal írunk (Notepad kompatibilitás), majd a további hozzátoldásoknál BOM nélkül fűzünk hozzá.
+            $encWithBOM = New-Object System.Text.UTF8Encoding $true
+            $encNoBOM   = New-Object System.Text.UTF8Encoding $false
+            if (-not (Test-Path $logPath)) {
+                [System.IO.File]::WriteAllText($logPath, $outLine + [Environment]::NewLine, $encWithBOM)
             } else {
-                $outLine | Out-File -FilePath $logPath -Encoding UTF8 -Append
+                [System.IO.File]::AppendAllText($logPath, $outLine + [Environment]::NewLine, $encNoBOM)
             }
         } catch {
             # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra.
