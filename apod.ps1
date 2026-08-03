@@ -169,6 +169,20 @@ if (-not $runningOnWindows) {
     exit 1
 }
 
+# Ellenőrizzük, hogy interaktív felhasználói munkamenetben futunk-e.
+# Ha nem (pl. Task Scheduler "Run whether user is logged on or not"),
+# a SystemParametersInfo hívás nem fog működni — ilyenkor kihagyjuk a háttérkép beállítást.
+try {
+    $isInteractive = [System.Environment]::UserInteractive
+} catch {
+    $isInteractive = $false
+}
+Write-Log "User: $env:USERNAME, Session: $env:SESSIONNAME, Interactive: $isInteractive" 'INFO'
+if (-not $isInteractive) {
+    Write-Log "Nem interaktív környezet — háttérkép beállítást kihagyom." 'WARN'
+    exit 0
+}
+
 # Csak akkor definiáljuk újra, ha a Wallpaper típus még nincs betöltve
 $wallpaperType = [AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType("Wallpaper") } | Where-Object { $_ -ne $null } | Select-Object -First 1
 if (-not $wallpaperType) {
