@@ -126,11 +126,54 @@ write_log "Cím: $TITLE" 'INFO'
 WALLPAPER_PATH="$PICTURES_DIR/apod_wallpaper.jpg"
 write_log "Letöltési cél: $WALLPAPER_PATH" 'INFO'
 
-# Kép letöltése (retry)
-if ! invoke_retry "curl -s --max-time 30 -L -o '$WALLPAPER_PATH' '$IMAGE_URL' && [[ -s '$WALLPAPER_PATH' ]]" 4 2; then
-    write_log "Nem sikerült letölteni a képet." 'ERROR'
-    # Nem lépünk ki, megpróbáljuk az előző képet beállítani ha létezik
+# --- Biztonságosabb letöltés: tmp fájl, retry, validálás (Content-Length vagy JPEG EOF) ---
+TMP_IMG=$(mktemp "${PICTURES_DIR}/apod_XXXXXX") || TMP_IMG=$(mktemp -t apod)
+cleanup_tmp() { rm -f "$TMP_IMG"; }
+trap cleanup_tmp EXIT
+
+# Erősebb curl beállítások: --fail (HTTP hibákra non-zero visszatérés), --retry, --continue-at - (folytatás),
+# nagyobb --max-time, -L követés.
+DOWNLOAD_CMD="curl -f -L --retry 5 --retry-delay 5 --max-time 120 --continue-at - -o '$TMP_IMG' '$IMAGE_URL'"
+
+if ! invoke_retry "$DOWNLOAD_CMD" 4 2; then
+    write_log "Nem sikerült letölteni a képet (curl visszatérés hibával)." 'ERROR'
+else
+    # Próbáljuk lekérni a Content-Length fejléct (ha van)
+    CONTENT_LENGTH=$(curl -sI "$IMAGE_URL" | tr -d '\r' | awk -F': ' '/^[Cc]ontent-Length:/ {print $2; exit}')
+    ACTUAL_SIZE=$(wc -c < "$TMP_IMG" | tr -d ' ')
+
+    if [[ -n "$CONTENT_LENGTH" && "$ACTUAL_SIZE" -lt "$CONTENT_LENGTH" ]]; then
+        write_log "A letöltött fájl kisebb mint a Content-Length ($ACTUAL_SIZE < $CONTENT_LENGTH). Újrapróbálkozás..." 'WARN'
+        # Próbáljuk folytatni / újratölteni egyszer
+        if ! curl -f -L --retry 3 --retry-delay 5 --max-time 120 --continue-at - -o "$TMP_IMG" "$IMAGE_URL"; then
+            write_log "Újrapróbálkozás sikertelen." 'ERROR'
+            rm -f "$TMP_IMG"
+        fi
+    else
+        # Ha nincs Content-Length, vagy nem tudjuk összevetni, ellenőrizzük JPEG EOF (ffd9)
+        if [[ -z "$CONTENT_LENGTH" ]]; then
+            last_hex=$(tail -c 2 "$TMP_IMG" | xxd -p -l 2 2>/dev/null || printf "")
+            if [[ -n "$last_hex" && "$last_hex" != "ffd9" ]]; then
+                write_log "A fájl nem végződik JPEG EOF jellel (valószínűleg részleges). Újrapróbálkozás..." 'WARN'
+                if ! curl -f -L --retry 3 --retry-delay 5 --max-time 120 --continue-at - -o "$TMP_IMG" "$IMAGE_URL"; then
+                    write_log "Újrapróbálkozás sikertelen." 'ERROR'
+                    rm -f "$TMP_IMG"
+                fi
+            fi
+        fi
+    fi
+
+    # Ha minden OK (létezik és nem üres), mozgassuk át atomikusan a végső helyre
+    if [[ -s "$TMP_IMG" ]]; then
+        mv -f "$TMP_IMG" "$WALLPAPER_PATH"
+        # cleanup_tmp trap törli már a TMP_IMG fájlt, de mv után már nincs mit törölni
+        trap - EXIT
+        write_log "Kép sikeresen letöltve és áthelyezve: $WALLPAPER_PATH" 'INFO'
+    else
+        write_log "A letöltött fájl üres vagy nem létezik a kísérlet után." 'ERROR'
+    fi
 fi
+# --- vége változtatás ---
 
 # Ellenőrzés: létezik-e a kép
 if [[ ! -f "$WALLPAPER_PATH" ]]; then
