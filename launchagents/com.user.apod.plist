@@ -3,13 +3,13 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.szekerestamas.apod</string>
+    <string>com.user.apod</string>
 
     <!-- ProgramArguments: teljes útvonal a bash-hez és a scriptedhez -->
     <key>ProgramArguments</key>
     <array>
       <string>/bin/bash</string>
-      <string>/Users/szekerestamas/Programok/apod.sh</string>
+      <string>/Users/user/Programok/apod.sh</string>
     </array>
 
     <!-- Indítás minden nap 07:00-kor -->
@@ -23,9 +23,9 @@
 
     <!-- Naplózás fájlokba (teljes elérési út) -->
     <key>StandardOutPath</key>
-    <string>/Users/szekerestamas/Library/Logs/com.szekerestamas.apod.out.log</string>
+    <string>/Users/user/Library/Logs/com.user.apod.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/szekerestamas/Library/Logs/com.szekerestamas.apod.err.log</string>
+    <string>/Users/user/Library/Logs/com.user.apod.err.log</string>
 
     <!-- Fusson a bejelentkezéskor is (opcionális) -->
     <key>RunAtLoad</key>
