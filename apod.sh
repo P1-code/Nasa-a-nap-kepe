@@ -136,7 +136,7 @@ trap cleanup_tmp EXIT
 DOWNLOAD_CMD="curl -f -L --retry 5 --retry-delay 5 --max-time 120 --continue-at - -o '$TMP_IMG' '$IMAGE_URL'"
 
 if ! invoke_retry "$DOWNLOAD_CMD" 4 2; then
-    write_log "Nem sikerült letölteni a képet (curl visszatérés hibával)." 'ERROR'
+    write_log "Nem sikerült letölteni a képet (curl visszatérés hibással)." 'ERROR'
 else
     # Próbáljuk lekérni a Content-Length fejléct (ha van)
     CONTENT_LENGTH=$(curl -sI "$IMAGE_URL" | tr -d '\r' | awk -F': ' '/^[Cc]ontent-Length:/ {print $2; exit}')
@@ -188,11 +188,16 @@ WALLPAPER_PATH_NORMALIZED=$(cd "$(dirname "$WALLPAPER_PATH")" && pwd)/$(basename
 
 write_log "Háttérkép beállítása macOS-en: $WALLPAPER_PATH_NORMALIZED" 'INFO'
 
-# AppleScript: háttérkép beállítása az összes monitoron
-if osascript -e "tell application \"Finder\" to set desktop picture to POSIX file \"$WALLPAPER_PATH_NORMALIZED\"" 2>/dev/null; then
+# AppleScript: háttérkép beállítása az összes monitoron (megbízhatóbb)
+AS_CMD="tell application \"System Events\" to set picture of every desktop to (POSIX file \"$WALLPAPER_PATH_NORMALIZED\")"
+write_log "AppleScript parancs futtatása: $AS_CMD" 'INFO'
+AS_OUT=$(osascript -e "$AS_CMD" 2>&1)
+AS_RC=$?
+if [[ $AS_RC -eq 0 ]]; then
     write_log "Háttérkép sikeresen beállítva: $WALLPAPER_PATH_NORMALIZED" 'INFO'
     exit 0
 else
-    write_log "Hiba történt a háttérkép beállítása közben (AppleScript)." 'ERROR'
+    write_log "Hiba történt az AppleScript futtatása közben (rc=$AS_RC): $AS_OUT" 'ERROR'
+    write_log "Próbáld meg kézzel futtatni az osascript parancsot a konzolból, és ellenőrizd az Automation engedélyeket." 'ERROR'
     exit 1
 fi
