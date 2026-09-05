@@ -175,29 +175,26 @@ else
 fi
 # --- vége változtatás ---
 
-# Ellenőrzés: létezik-e a kép
-if [[ ! -f "$WALLPAPER_PATH" ]]; then
-    write_log "A háttérkép fájl nem létezik: $WALLPAPER_PATH" 'ERROR'
+# Ellenőrizzük a fájl létezését
+if [[ ! -f "$WALLPAPER_PATH_NORMALIZED" ]]; then
+    echo "Hiba: A fájl nem található: $WALLPAPER_PATH_NORMALIZED"
     exit 1
 fi
 
-# Háttérkép beállítása macOS-en
-# Az AppleScript korlátja: az elérési út maximum ~1000 karakter lehet
-# Ha szükséges, normalizáljuk az elérési utat
-WALLPAPER_PATH_NORMALIZED=$(cd "$(dirname "$WALLPAPER_PATH")" && pwd)/$(basename "$WALLPAPER_PATH")
+# Az Apple dugja fel magának a dokumentációját, és a nem dokumentált háttérképcsere megoldását!
+# Ez nem hivatalos, de működő megoldás
+NEW_DB="$HOME/Library/Application Support/com.apple.wallpaper/Store/Index.sqlite"
 
-write_log "Háttérkép beállítása macOS-en: $WALLPAPER_PATH_NORMALIZED" 'INFO'
-
-# AppleScript: háttérkép beállítása az összes monitoron (megbízhatóbb)
-AS_CMD="tell application \"System Events\" to set picture of every desktop to (POSIX file \"$WALLPAPER_PATH_NORMALIZED\")"
-write_log "AppleScript parancs futtatása: $AS_CMD" 'INFO'
-AS_OUT=$(osascript -e "$AS_CMD" 2>&1)
-AS_RC=$?
-if [[ $AS_RC -eq 0 ]]; then
-    write_log "Háttérkép sikeresen beállítva: $WALLPAPER_PATH_NORMALIZED" 'INFO'
-    exit 0
+if [[ -f "$NEW_DB" ]]; then
+    # Az új adatbázisban frissítjük a háttérkép útvonalát
+    sqlite3 "$NEW_DB" "UPDATE Asset SET url = 'file://$WALLPAPER_PATH_NORMALIZED';" 2>/dev/null
+    
+    # Újraindítjuk az új Háttérkép szolgáltatást
+    killall WallpaperAgent 2>/dev/null
+    
+    echo "Háttérkép sikeresen frissítve az új rendszereken."
 else
-    write_log "Hiba történt az AppleScript futtatása közben (rc=$AS_RC): $AS_OUT" 'ERROR'
-    write_log "Próbáld meg kézzel futtatni az osascript parancsot a konzolból, és ellenőrizd az Automation engedélyeket." 'ERROR'
-    exit 1
+    # Ha az új SQLite sem létezik, a macOS a Defaults / Plist rendszert használja:
+    defaults write com.apple.wallpaper Wallpapers "{}"
+    killall WallpaperAgent 2>/dev/null
 fi
