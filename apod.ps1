@@ -1,32 +1,41 @@
-﻿# NASA APOD háttérkép beállítása PowerShellből
+﻿# ==========================================
+# NASA APOD háttérkép beállítása PowerShellből (Új API)
+# ==========================================
 
-# API kulcs: prioritásban a környezeti változó
-$apiKey = $env:NASA_API_KEY
-if (-not $apiKey) { $apiKey = "DEMO_KEY" }
-$apodUrl = "https://api.nasa.gov/planetary/apod?api_key=$apiKey"
+$apodUrl = "https://science.nasa.gov/wp-json/wp/v2/apod-basic"
 
 # Naplózás beállítása (opcionális fájlba)
-# Állítsd APOD_LOG_DISABLE=1 környezeti változót, ha nem szeretnéd a fájlba írást.
 $logDisabled = $false
 if ($env:APOD_LOG_DISABLE -and $env:APOD_LOG_DISABLE -eq '1') { $logDisabled = $true }
 
-# Konzol és kimeneti kódolás beállítása, hogy az ékezetek megjelenjenek
+# Konzol és kimeneti kódolás beállítása UTF-8-ra
 try {
-    # Opció: chcp 65001 > $null  # ha szükséges, engedélyezheted az UTF-8 code page-t is
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $OutputEncoding = [System.Text.Encoding]::UTF8
-} catch {
-    # Ha nem megy, ne állítsa meg a scriptet
-}
+} catch {}
 
-# Naplózási könyvtár: preferáljuk a OneDrive Pictures-t, majd a helyi Pictures-t
+# Naplózási könyvtár: OneDrive Pictures -> Helyi Pictures
 $oneDrivePics = Join-Path $env:USERPROFILE "OneDrive\Pictures"
 $localPics = Join-Path $env:USERPROFILE "Pictures"
-if (Test-Path $oneDrivePics) { $logDir = $oneDrivePics } elseif (Test-Path $localPics) { $logDir = $localPics } else {
-    try { New-Item -Path $localPics -ItemType Directory -Force | Out-Null; $logDir = $localPics } catch { $logDir = $null }
+
+if (Test-Path $oneDrivePics) { 
+    $logDir = $oneDrivePics 
+} elseif (Test-Path $localPics) { 
+    $logDir = $localPics 
+} else {
+    try { 
+        New-Item -Path $localPics -ItemType Directory -Force | Out-Null
+        $logDir = $localPics 
+    } catch { 
+        $logDir = $null 
+    }
 }
 
-if (-not $logDisabled -and $logDir) { $logPath = Join-Path $logDir "apod.log" } else { $logPath = $null }
+if (-not $logDisabled -and $logDir) { 
+    $logPath = Join-Path $logDir "apod.log" 
+} else { 
+    $logPath = $null 
+}
 
 function Write-Log {
     param(
@@ -36,11 +45,6 @@ function Write-Log {
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     $outLine = "[$ts] [$Level] $Message"
 
-
-    # Use Write-Warning for non-terminating error output so the script doesn't
-    # generate a PowerShell error record/exception when we only want to log.
-    # Print to console with colors instead of Write-Warning so PowerShell
-    # doesn't prefix the message with its own "WARNING:" label.
     switch ($Level) {
         'ERROR' { Write-Host $outLine -ForegroundColor Red }
         'WARN'  { Write-Host $outLine -ForegroundColor Yellow }
@@ -49,8 +53,6 @@ function Write-Log {
 
     if (-not $logDisabled -and $logPath) {
         try {
-            # Írjunk fájlba UTF-8 kódolással. A jobb kompatibilitás érdekében új fájl létrehozásakor
-            # BOM-mal írunk (Notepad kompatibilitás), majd a további hozzátoldásoknál BOM nélkül fűzünk hozzá.
             $encWithBOM = New-Object System.Text.UTF8Encoding $true
             $encNoBOM   = New-Object System.Text.UTF8Encoding $false
             if (-not (Test-Path $logPath)) {
@@ -59,10 +61,8 @@ function Write-Log {
                 [System.IO.File]::AppendAllText($logPath, $outLine + [Environment]::NewLine, $encNoBOM)
             }
         } catch {
-            # Ne akadályozzuk a futást a naplóhiba miatt; írjuk ki konzolra.
             $warnTs = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-            $warnLine = "[$warnTs] [WARN] Nem sikerült naplófájlba írni: $($_.Exception.Message)"
-            Write-Host $warnLine
+            Write-Host "[$warnTs] [WARN] Nem sikerült naplófájlba írni: $($_.Exception.Message)"
         }
     }
 }
@@ -74,7 +74,6 @@ function Invoke-Retry {
         [int]$MaxRetries = 3,
         [int]$DelaySeconds = 2
     )
-
     $attempt = 0
     while ($true) {
         try {
@@ -96,32 +95,53 @@ Write-Log "Lekérdezés indítása: $apodUrl" 'INFO'
 
 # APOD metaadatok lekérése (retry)
 try {
-    $apodData = Invoke-Retry -ScriptBlock { Invoke-RestMethod -Uri $apodUrl -ErrorAction Stop } -MaxRetries 3 -DelaySeconds 2
+    $response = Invoke-Retry -ScriptBlock { Invoke-RestMethod -Uri $apodUrl -ErrorAction Stop } -MaxRetries 3 -DelaySeconds 2
+    
+    # Mivel a végpont tömböt ad vissza, CSAK a legelső elemet (a mai napot) választjuk ki
+    if ($response -is [System.Array]) {
+        $apodData = $response[0]
+    } else {
+        $apodData = $response
+    }
+    
     Write-Log "APOD metaadatok sikeresen lekérve." 'INFO'
 } catch {
     Write-Log "Nem sikerült lekérni az APOD metaadatokat: $($_.Exception.Message)" 'ERROR'
     exit 1
 }
 
-# Ellenőrizzük, hogy valóban kép-e (APOD néha videó)
+# Ellenőrizzük, hogy valóban kép-e
 if ($apodData.media_type -and $apodData.media_type -ne 'image') {
     Write-Log "A mai APOD nem kép (media_type = $($apodData.media_type)). Nem állítok be háttérképet." 'INFO'
     if ($apodData.url) { Write-Log "URL: $($apodData.url)" 'INFO' }
     exit 0
 }
 
-# Kép URL-je
+# Kép URL-je a kiválasztott egyetlen elembol
 $imageUrl = $apodData.hdurl
-if (-not $imageUrl) { $imageUrl = $apodData.url }
 if (-not $imageUrl) {
-    Write-Log "Nincs elérhető kép URL az API válaszban." 'ERROR'
+    $imageUrl = $apodData.url
+}
+
+# Biztonsági tisztítás: ha bármi miatt mégis több URL jönne át, az elsőt szedjük ki
+if ($imageUrl -is [System.Array]) {
+    $imageUrl = $imageUrl[0]
+} elseif ($imageUrl -is [string] -and $imageUrl -match '\s') {
+    $imageUrl = ($imageUrl -split '\s+')[0]
+}
+
+if (-not $imageUrl) {
+    Write-Log "Nem található kép URL." 'ERROR'
     exit 1
 }
 Write-Log "Kép URL: $imageUrl" 'INFO'
 
-# Letöltési hely: próbáljuk először a OneDrive Pictures mappát, ha nincs, fallback a helyi Pictures mappára
-if (Test-Path $oneDrivePics) { $wallpaperDir = $oneDrivePics } elseif (Test-Path $localPics) { $wallpaperDir = $localPics } else { 
-    # Ha egyik sem létezik, létrehozzuk a helyi Pictures mappát
+# Letöltési hely meghatározása
+if (Test-Path $oneDrivePics) { 
+    $wallpaperDir = $oneDrivePics 
+} elseif (Test-Path $localPics) { 
+    $wallpaperDir = $localPics 
+} else { 
     try {
         New-Item -Path $localPics -ItemType Directory -Force | Out-Null
         $wallpaperDir = $localPics
@@ -140,27 +160,24 @@ try {
     Write-Log "Kép letöltve: $wallpaperPath" 'INFO'
 } catch {
     Write-Log "Nem sikerült letölteni a képet: $($_.Exception.Message)" 'ERROR'
-    #exit 1
+    exit 1
 }
 
-# Háttérkép beállítása Windows alatt — megbízható OS ellenőrzés (támogatja a Windows PowerShell 5.1-et és PowerShell Core-t)
+# Windows környezet ellenőrzése
 $runningOnWindows = $false
 try {
     if ($IsWindows -eq $true) { $runningOnWindows = $true }
-} catch {
-    # $IsWindows lehet, hogy nincs definiálva (pl. Windows PowerShell 5.1), ezért a fallback-et használjuk
-}
+} catch {}
 
 if (-not $runningOnWindows) {
-    if ($env:OS -eq 'Windows_NT') { $runningOnWindows = $true }
-    else {
+    if ($env:OS -eq 'Windows_NT') { 
+        $runningOnWindows = $true 
+    } else {
         try {
             if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
                 $runningOnWindows = $true
             }
-        } catch {
-            # Ha ez sem működik, marad false
-        }
+        } catch {}
     }
 }
 
@@ -169,22 +186,22 @@ if (-not $runningOnWindows) {
     exit 1
 }
 
-# Ellenőrizzük, hogy interaktív felhasználói munkamenetben futunk-e.
-# Ha nem (pl. Task Scheduler "Run whether user is logged on or not"),
-# a SystemParametersInfo hívás nem fog működni — ilyenkor kihagyjuk a háttérkép beállítást.
+# Interaktív munkamenet ellenőrzése
 try {
     $isInteractive = [System.Environment]::UserInteractive
 } catch {
     $isInteractive = $false
 }
 Write-Log "User: $env:USERNAME, Session: $env:SESSIONNAME, Interactive: $isInteractive" 'INFO'
+
 if (-not $isInteractive) {
     Write-Log "Nem interaktív környezet — háttérkép beállítást kihagyom." 'WARN'
     exit 0
 }
 
-# Csak akkor definiáljuk újra, ha a Wallpaper típus még nincs betöltve
+# Wallpaper típus betöltése C# P/Invoke segítségével
 $wallpaperType = [AppDomain]::CurrentDomain.GetAssemblies() | ForEach-Object { $_.GetType("Wallpaper") } | Where-Object { $_ -ne $null } | Select-Object -First 1
+
 if (-not $wallpaperType) {
     Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
@@ -215,4 +232,3 @@ try {
     Write-Log "Hiba történt a háttérkép beállítása közben: $($_.Exception.Message)" 'ERROR'
     exit 1
 }
-
